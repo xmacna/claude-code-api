@@ -167,33 +167,7 @@ class ClaudeProcess:
                     session_id=self.session_id,
                     error=str(e)
                 )
-    
-    async def _start_mock_process(self, prompt: str, model: str):
-        """Start mock process for testing."""
-        self.is_running = True
-        
-        # Create mock Claude response
-        mock_response = {
-            "type": "result",
-            "sessionId": self.session_id,
-            "model": model or "claude-3-5-haiku-20241022",
-            "message": {
-                "role": "assistant", 
-                "content": f"Hello! You said: '{prompt}'. This is a mock response from Claude Code API Gateway."
-            },
-            "usage": {
-                "input_tokens": len(prompt.split()),
-                "output_tokens": 15,
-                "total_tokens": len(prompt.split()) + 15
-            },
-            "cost_usd": 0.001,
-            "duration_ms": 100
-        }
-        
-        # Put the response in the queue
-        await self.output_queue.put(mock_response)
-        await self.output_queue.put(None)  # End signal
-    
+
     async def stop(self):
         """Stop Claude process."""
         self.is_running = False
@@ -336,20 +310,60 @@ class ClaudeManager:
 
 
 # Utility functions for project management
+def sanitize_path_component(component: str) -> str:
+    """Sanitize a path component to prevent directory traversal attacks."""
+    import re
+    # Remove any path separators and special characters
+    sanitized = re.sub(r'[^\w\-.]', '_', component)
+    # Remove leading dots to prevent hidden files
+    sanitized = sanitized.lstrip('.')
+    # Limit length
+    sanitized = sanitized[:255]
+    if not sanitized:
+        raise ValueError("Invalid path component: results in empty string after sanitization")
+    return sanitized
+
+
 def create_project_directory(project_id: str) -> str:
-    """Create project directory."""
-    project_path = os.path.join(settings.project_root, project_id)
+    """Create project directory with path validation."""
+    # Sanitize the project_id to prevent path traversal
+    safe_project_id = sanitize_path_component(project_id)
+
+    # Construct the full path
+    project_path = os.path.join(settings.project_root, safe_project_id)
+
+    # Verify the resulting path is still within project_root (defense in depth)
+    project_path = os.path.abspath(project_path)
+    root_path = os.path.abspath(settings.project_root)
+
+    if not project_path.startswith(root_path + os.sep):
+        raise ValueError(f"Invalid project path: {project_id} resolves outside project root")
+
     os.makedirs(project_path, exist_ok=True)
+    logger.info("Project directory created", project_id=safe_project_id, path=project_path)
     return project_path
 
 
 def cleanup_project_directory(project_path: str):
-    """Clean up project directory."""
+    """Clean up project directory with path validation."""
     try:
         import shutil
-        if os.path.exists(project_path):
-            shutil.rmtree(project_path)
-            logger.info("Project directory cleaned up", path=project_path)
+
+        # Verify the path is within project_root before deletion
+        abs_project_path = os.path.abspath(project_path)
+        root_path = os.path.abspath(settings.project_root)
+
+        if not abs_project_path.startswith(root_path + os.sep):
+            logger.error(
+                "Refused to cleanup directory outside project root",
+                path=project_path,
+                project_root=settings.project_root
+            )
+            raise ValueError(f"Cannot cleanup path outside project root: {project_path}")
+
+        if os.path.exists(abs_project_path):
+            shutil.rmtree(abs_project_path)
+            logger.info("Project directory cleaned up", path=abs_project_path)
     except Exception as e:
         logger.error("Failed to cleanup project directory", path=project_path, error=str(e))
 
