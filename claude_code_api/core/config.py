@@ -74,10 +74,10 @@ class Settings(BaseSettings):
             return [x.strip() for x in v.split(',') if x.strip()]
         return v or []
     
-    # Claude Configuration  
+    # Claude Configuration
     claude_binary_path: str = find_claude_binary()
     claude_api_key: str = ""
-    default_model: str = "claude-3-5-sonnet-20241022"
+    default_model: str = "sonnet"  # Alias - CLI resolves to latest
     max_concurrent_sessions: int = 10
     session_timeout_minutes: int = 30
     

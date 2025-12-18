@@ -6,12 +6,29 @@ from pydantic import BaseModel, Field
 from enum import Enum
 
 
+# Model aliases - these are always up-to-date with Claude Code CLI
+# The CLI resolves aliases to the latest model version automatically
+MODEL_ALIASES = {
+    "sonnet": "sonnet",      # CLI resolves to latest sonnet
+    "opus": "opus",          # CLI resolves to latest opus
+    "haiku": "haiku",        # CLI resolves to latest haiku
+}
+
+# Known full model IDs (for /v1/models endpoint display)
+# These may become outdated but won't break - CLI validates
+KNOWN_MODELS = [
+    "claude-opus-4-5-20251101",
+    "claude-sonnet-4-5-20250929",
+    "claude-haiku-4-5-20251001",
+    "claude-3-5-haiku-20241022",  # legacy
+]
+
+
 class ClaudeModel(str, Enum):
-    """Available Claude models - matching Claude Code CLI supported models."""
-    OPUS_4 = "claude-opus-4-20250514"
-    SONNET_4 = "claude-sonnet-4-20250514"
-    SONNET_37 = "claude-3-7-sonnet-20250219"
-    HAIKU_35 = "claude-3-5-haiku-20241022"
+    """Model aliases for Claude Code CLI."""
+    SONNET = "sonnet"
+    OPUS = "opus"
+    HAIKU = "haiku"
 
 
 class ClaudeMessageType(str, Enum):
@@ -125,7 +142,7 @@ class ClaudeProjectConfig(BaseModel):
     project_id: str = Field(..., description="Project ID")
     name: str = Field(..., description="Project name")
     path: str = Field(..., description="Project path")
-    default_model: str = Field(ClaudeModel.HAIKU_35, description="Default model")
+    default_model: str = Field("sonnet", description="Default model")
     system_prompt: Optional[str] = Field(None, description="Default system prompt")
     tools_enabled: List[ClaudeToolType] = Field(default_factory=list, description="Enabled tools")
     max_tokens: Optional[int] = Field(None, description="Maximum tokens per request")
@@ -196,70 +213,105 @@ class ClaudeModelInfo(BaseModel):
 
 # Utility functions for model validation
 def validate_claude_model(model: str) -> str:
-    """Validate and normalize Claude model name."""
-    # Direct Claude model names
-    valid_models = [model.value for model in ClaudeModel]
-    
-    if model in valid_models:
+    """Validate and normalize Claude model name.
+
+    Accepts:
+    - Simple aliases: sonnet, opus, haiku (recommended)
+    - Full model IDs: claude-sonnet-4-5-20250929, etc
+    - Any string starting with 'claude-' (CLI will validate)
+
+    Returns the model string to pass to Claude Code CLI.
+    """
+    if not model:
+        return ClaudeModel.SONNET.value  # Default to sonnet
+
+    model_lower = model.lower().strip()
+
+    # Check if it's a known alias
+    if model_lower in MODEL_ALIASES:
+        return MODEL_ALIASES[model_lower]
+
+    # Accept any claude-* model ID - let CLI validate
+    if model_lower.startswith("claude-"):
         return model
-    
-    # Default to Haiku for testing
-    return ClaudeModel.HAIKU_35
+
+    # Default to sonnet for unknown models
+    return ClaudeModel.SONNET.value
 
 
 def get_default_model() -> str:
     """Get the default Claude model."""
-    return ClaudeModel.HAIKU_35
+    return ClaudeModel.SONNET.value
 
 
 def get_model_info(model_id: str) -> ClaudeModelInfo:
     """Get information about a Claude model."""
-    model_info = {
-        ClaudeModel.OPUS_4: ClaudeModelInfo(
-            id=ClaudeModel.OPUS_4,
-            name="Claude Opus 4",
-            description="Most powerful Claude model for complex reasoning",
-            max_tokens=500000,
+    # Alias models (recommended - always up-to-date)
+    alias_info = {
+        "sonnet": ClaudeModelInfo(
+            id="sonnet",
+            name="Claude Sonnet (Latest)",
+            description="Best balance of speed and capability. Alias for latest Sonnet.",
+            max_tokens=200000,
+            input_cost_per_1k=3.0,
+            output_cost_per_1k=15.0,
+            supports_streaming=True,
+            supports_tools=True
+        ),
+        "opus": ClaudeModelInfo(
+            id="opus",
+            name="Claude Opus (Latest)",
+            description="Most powerful model for complex reasoning. Alias for latest Opus.",
+            max_tokens=200000,
             input_cost_per_1k=15.0,
             output_cost_per_1k=75.0,
             supports_streaming=True,
             supports_tools=True
         ),
-        ClaudeModel.SONNET_4: ClaudeModelInfo(
-            id=ClaudeModel.SONNET_4,
-            name="Claude Sonnet 4",
-            description="Latest Sonnet model with enhanced capabilities",
-            max_tokens=500000,
-            input_cost_per_1k=3.0,
-            output_cost_per_1k=15.0,
-            supports_streaming=True,
-            supports_tools=True
-        ),
-        ClaudeModel.SONNET_37: ClaudeModelInfo(
-            id=ClaudeModel.SONNET_37,
-            name="Claude Sonnet 3.7",
-            description="Advanced Sonnet model for complex tasks",
-            max_tokens=200000,
-            input_cost_per_1k=3.0,
-            output_cost_per_1k=15.0,
-            supports_streaming=True,
-            supports_tools=True
-        ),
-        ClaudeModel.HAIKU_35: ClaudeModelInfo(
-            id=ClaudeModel.HAIKU_35,
-            name="Claude Haiku 3.5",
-            description="Fast and cost-effective model for quick tasks",
+        "haiku": ClaudeModelInfo(
+            id="haiku",
+            name="Claude Haiku (Latest)",
+            description="Fast and cost-effective. Alias for latest Haiku.",
             max_tokens=200000,
             input_cost_per_1k=0.25,
             output_cost_per_1k=1.25,
             supports_streaming=True,
             supports_tools=True
-        )
+        ),
     }
-    
-    return model_info.get(model_id, model_info[ClaudeModel.HAIKU_35])
+
+    # Check aliases first
+    if model_id.lower() in alias_info:
+        return alias_info[model_id.lower()]
+
+    # For full model IDs, return generic info
+    # Pricing is approximate - actual pricing from Anthropic
+    return ClaudeModelInfo(
+        id=model_id,
+        name=model_id,
+        description=f"Claude model: {model_id}",
+        max_tokens=200000,
+        input_cost_per_1k=3.0,
+        output_cost_per_1k=15.0,
+        supports_streaming=True,
+        supports_tools=True
+    )
 
 
 def get_available_models() -> List[ClaudeModelInfo]:
-    """Get list of all available Claude models."""
-    return [get_model_info(model) for model in ClaudeModel]
+    """Get list of all available Claude models.
+
+    Returns aliases (recommended) plus known full model IDs.
+    The CLI will validate the actual model availability.
+    """
+    models = []
+
+    # Add aliases first (recommended)
+    for alias in MODEL_ALIASES.keys():
+        models.append(get_model_info(alias))
+
+    # Add known full model IDs
+    for model_id in KNOWN_MODELS:
+        models.append(get_model_info(model_id))
+
+    return models
