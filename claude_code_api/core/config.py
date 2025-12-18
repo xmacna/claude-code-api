@@ -94,15 +94,22 @@ class Settings(BaseSettings):
     log_format: str = "json"
     
     # CORS Configuration
-    allowed_origins: List[str] = Field(default=["*"])
-    allowed_methods: List[str] = Field(default=["*"])
+    # Default to localhost only for security - can be overridden via ALLOWED_ORIGINS env var
+    allowed_origins: List[str] = Field(default=[
+        "http://localhost:*",
+        "http://127.0.0.1:*",
+        "http://[::1]:*"
+    ])
+    allowed_methods: List[str] = Field(default=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"])
     allowed_headers: List[str] = Field(default=["*"])
-    
+
     @field_validator('allowed_origins', 'allowed_methods', 'allowed_headers', mode='before')
     def parse_cors_lists(cls, v):
         if isinstance(v, str):
-            return [x.strip() for x in v.split(',') if x.strip()]
-        return v or ["*"]
+            # Support comma-separated values or "*" for all
+            parsed = [x.strip() for x in v.split(',') if x.strip()]
+            return parsed if parsed else ["http://localhost:*"]
+        return v if v else ["http://localhost:*"]
     
     # Rate Limiting
     rate_limit_requests_per_minute: int = 100

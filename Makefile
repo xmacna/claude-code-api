@@ -6,10 +6,27 @@ install:
 	pip install requests
 
 test:
+	python -m pytest tests/ -v --cov=claude_code_api --cov-report=html --cov-report=term-missing
+
+test-no-cov:
 	python -m pytest tests/ -v
 
 test-real:
 	python tests/test_real_api.py
+
+coverage:
+	@if [ -f htmlcov/index.html ]; then \
+		echo "Opening coverage report..."; \
+		if command -v xdg-open > /dev/null 2>&1; then \
+			xdg-open htmlcov/index.html; \
+		elif command -v open > /dev/null 2>&1; then \
+			open htmlcov/index.html; \
+		else \
+			echo "Coverage report available at: htmlcov/index.html"; \
+		fi \
+	else \
+		echo "No coverage report found. Run 'make test' first."; \
+	fi
 
 start:
 	uvicorn claude_code_api.main:app --host 0.0.0.0 --port 8000 --reload --reload-exclude="*.db*" --reload-exclude="*.log"
@@ -44,8 +61,10 @@ help:
 	@echo ""
 	@echo "Python API:"
 	@echo "  make install     - Install Python dependencies"
-	@echo "  make test        - Run Python unit tests with real Claude integration"
+	@echo "  make test        - Run Python unit tests with coverage report"
+	@echo "  make test-no-cov - Run Python unit tests without coverage"
 	@echo "  make test-real   - Run REAL end-to-end tests (curls actual API)"
+	@echo "  make coverage    - View HTML coverage report (run after 'make test')"
 	@echo "  make start       - Start Python API server (development with reload)"
 	@echo "  make start-prod  - Start Python API server (production)"
 	@echo ""
