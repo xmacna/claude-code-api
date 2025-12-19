@@ -38,17 +38,28 @@ class ClaudeProcess:
             # Prepare real command - using exact format from working Claudia example
             cmd = [settings.claude_binary_path]
             cmd.extend(["-p", prompt])
-            
+
             if system_prompt:
                 cmd.extend(["--system-prompt", system_prompt])
-            
+
             if model:
                 cmd.extend(["--model", model])
-            
+
+            # Resume existing session if provided (must be valid UUID)
+            if resume_session:
+                # Check if it's a valid UUID
+                import re
+                uuid_pattern = r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                if re.match(uuid_pattern, resume_session, re.IGNORECASE):
+                    cmd.extend(["--resume", resume_session])
+                    logger.info(f"Resuming session: {resume_session}")
+                else:
+                    logger.info(f"session_id '{resume_session}' is not a valid UUID, creating new session")
+
             # Always use stream-json output format (exact order from working example)
             cmd.extend([
                 "--output-format", "stream-json",
-                "--verbose", 
+                "--verbose",
                 "--dangerously-skip-permissions"
             ])
             

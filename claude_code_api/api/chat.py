@@ -138,20 +138,18 @@ async def create_chat_completion(
         
         # Handle session management
         if request.session_id:
-            # Continue existing session
+            # Continue existing session - use provided session_id for Claude CLI --resume
             session_id = request.session_id
             session_info = await session_manager.get_session(session_id)
-            
+
+            # If session doesn't exist in our DB, create it (session exists in Claude CLI)
             if not session_info:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail={
-                        "error": {
-                            "message": f"Session {session_id} not found",
-                            "type": "invalid_request_error",
-                            "code": "session_not_found"
-                        }
-                    }
+                logger.info(f"Session {session_id} not in DB, creating for resume")
+                await session_manager.create_session(
+                    project_id=project_id,
+                    model=claude_model,
+                    system_prompt=system_prompt,
+                    session_id=session_id
                 )
         else:
             # Create new session
