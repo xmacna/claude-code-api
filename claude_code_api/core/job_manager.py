@@ -304,7 +304,10 @@ class JobManager:
                 "--output-format", "stream-json",
                 "--include-partial-messages",
                 "--verbose",
-                "--dangerously-skip-permissions"
+                "--dangerously-skip-permissions",
+                "--strict-mcp-config",
+                "--no-chrome",
+                "--disable-slash-commands"
             ])
 
             # Create project directory
