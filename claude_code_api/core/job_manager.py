@@ -302,6 +302,7 @@ class JobManager:
 
             cmd.extend([
                 "--output-format", "stream-json",
+                "--include-partial-messages",
                 "--verbose",
                 "--dangerously-skip-permissions"
             ])
