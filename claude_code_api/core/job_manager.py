@@ -54,6 +54,7 @@ class Job:
         self.process: Optional[asyncio.subprocess.Process] = None
         self._cancel_event = asyncio.Event()
         self._last_progress_sent: Optional[datetime] = None
+        self._last_activity: str = "Iniciando..."  # Track last meaningful activity for periodic updates
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert job to dictionary."""
@@ -303,7 +304,10 @@ class JobManager:
             cmd.extend([
                 "--output-format", "stream-json",
                 "--verbose",
-                "--dangerously-skip-permissions"
+                "--dangerously-skip-permissions",
+                "--include-partial-messages",
+                "--strict-mcp-config",
+                "--disable-slash-commands"
             ])
 
             # Create project directory
@@ -327,10 +331,27 @@ class JobManager:
             claude_session_id = None
 
             line_count = 0
+            last_periodic_update = datetime.utcnow()
+            periodic_update_interval = 60  # Send progress every 60 seconds
+
             while True:
                 if job._cancel_event.is_set():
                     job.process.terminate()
                     break
+
+                # Check periodic progress before reading (runs every iteration)
+                now = datetime.utcnow()
+                elapsed = (now - last_periodic_update).total_seconds()
+                if elapsed >= periodic_update_interval:
+                    last_periodic_update = now
+                    elapsed_total = (now - job.started_at).total_seconds() if job.started_at else 0
+                    minutes = int(elapsed_total // 60)
+                    # Use last meaningful activity instead of generic message
+                    msg = f"[{minutes}min] {job._last_activity}" if minutes > 0 else job._last_activity
+                    job.add_progress(msg)  # Add to job.progress for polling
+                    if job.callback_url:
+                        await self._send_callback(job, "progress", message=msg)
+                    logger.info("Sent periodic progress", job_id=job.job_id, elapsed_minutes=minutes, activity=job._last_activity)
 
                 # Read line with timeout
                 try:
@@ -368,7 +389,7 @@ class JobManager:
 
                     # Log message type for debugging
                     msg_type = data.get("type", "unknown")
-                    logger.info("Claude message", job_id=job.job_id, line=line_count, msg_type=msg_type)
+                    logger.debug("Claude message", job_id=job.job_id, line=line_count, msg_type=msg_type)
 
                     # Parse progress from different message types
                     await self._parse_progress(job, data)
@@ -425,14 +446,45 @@ class JobManager:
         if msg_type == "system":
             message = data.get("message", "")
             if message:
+                job._last_activity = message[:80]  # Track for periodic updates
                 job.add_progress(message)
                 await self._maybe_send_progress_callback(job, message)
 
-        # Tool use indicates activity
+        # Stream events contain tool use info
+        elif msg_type == "stream_event":
+            event = data.get("event", {})
+            event_type = event.get("type", "")
+
+            # Tool use starts in content_block_start
+            if event_type == "content_block_start":
+                content_block = event.get("content_block", {})
+                if content_block.get("type") == "tool_use":
+                    tool_name = content_block.get("name", "tool")
+                    activity = f"Usando {tool_name}"
+                    job._last_activity = activity
+                    job.add_progress(activity)
+                    await self._maybe_send_progress_callback(job, f"{activity}...")
+
+            # Content block delta for text streaming
+            elif event_type == "content_block_delta":
+                delta = event.get("delta", {})
+                if delta.get("type") == "text_delta":
+                    job._last_activity = "Escrevendo resposta..."
+                    partial_text = delta.get("text", "")
+                    if partial_text:
+                        if job.output:
+                            job.output += partial_text
+                        else:
+                            job.output = partial_text
+                        job.updated_at = datetime.utcnow()
+
+        # Legacy tool_use type (fallback)
         elif msg_type == "tool_use":
             tool_name = data.get("name", "tool")
-            job.add_progress(f"Usando ferramenta: {tool_name}")
-            await self._maybe_send_progress_callback(job, f"Usando {tool_name}...")
+            activity = f"Usando {tool_name}"
+            job._last_activity = activity
+            job.add_progress(activity)
+            await self._maybe_send_progress_callback(job, f"{activity}...")
 
         # Tool result
         elif msg_type == "tool_result":
@@ -443,9 +495,11 @@ class JobManager:
             content = data.get("message", {}).get("content", [])
             text = self._extract_text_from_content(content)
             if text:
-                # Update output incrementally
+                # Update output incrementally (may already have partial text)
                 if job.output:
-                    job.output += "\n\n" + text
+                    # Only append if not already captured via partial messages
+                    if not job.output.endswith(text):
+                        job.output += "\n\n" + text
                 else:
                     job.output = text
                 job.updated_at = datetime.utcnow()
