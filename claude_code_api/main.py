@@ -19,10 +19,12 @@ from claude_code_api.core.config import settings
 from claude_code_api.core.database import create_tables, close_database
 from claude_code_api.core.session_manager import SessionManager
 from claude_code_api.core.claude_manager import ClaudeManager
+from claude_code_api.core.job_manager import JobManager
 from claude_code_api.api.chat import router as chat_router
 from claude_code_api.api.models import router as models_router
 from claude_code_api.api.projects import router as projects_router
 from claude_code_api.api.sessions import router as sessions_router
+from claude_code_api.api.jobs import router as jobs_router
 from claude_code_api.core.auth import auth_middleware
 
 
@@ -60,7 +62,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Initialize managers
     app.state.session_manager = SessionManager()
     app.state.claude_manager = ClaudeManager()
-    logger.info("Managers initialized")
+    app.state.job_manager = JobManager(max_workers=5, progress_throttle_seconds=30)
+    await app.state.job_manager.start()
+    logger.info("Managers initialized (including JobManager)")
     
     # Verify Claude Code availability
     try:
@@ -77,6 +81,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     
     # Cleanup
     logger.info("Shutting down Claude Code API Gateway")
+    await app.state.job_manager.stop()
     await app.state.session_manager.cleanup_all()
     await close_database()
     logger.info("Shutdown complete")
@@ -155,10 +160,11 @@ async def root():
     """Root endpoint with API information."""
     return {
         "name": "Claude Code API Gateway",
-        "version": "1.0.0",
-        "description": "OpenAI-compatible API for Claude Code",
+        "version": "1.1.0",
+        "description": "OpenAI-compatible API for Claude Code with async job support",
         "endpoints": {
             "chat": "/v1/chat/completions",
+            "jobs": "/v1/jobs",
             "models": "/v1/models",
             "projects": "/v1/projects",
             "sessions": "/v1/sessions"
@@ -173,6 +179,7 @@ app.include_router(chat_router, prefix="/v1", tags=["chat"])
 app.include_router(models_router, prefix="/v1", tags=["models"])
 app.include_router(projects_router, prefix="/v1", tags=["projects"])
 app.include_router(sessions_router, prefix="/v1", tags=["sessions"])
+app.include_router(jobs_router, prefix="/v1", tags=["jobs"])
 
 
 if __name__ == "__main__":
