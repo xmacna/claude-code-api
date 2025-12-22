@@ -302,12 +302,8 @@ class JobManager:
 
             cmd.extend([
                 "--output-format", "stream-json",
-                "--include-partial-messages",
                 "--verbose",
-                "--dangerously-skip-permissions",
-                "--strict-mcp-config",
-                "--no-chrome",
-                "--disable-slash-commands"
+                "--dangerously-skip-permissions"
             ])
 
             # Create project directory
